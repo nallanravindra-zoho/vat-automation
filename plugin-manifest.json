@@ -1,0 +1,23 @@
+{
+  "extension_name": "knights_telecom_vat_automation",
+  "display_name": "Knights Telecom - VAT Return Automation",
+  "version": "1.0.0",
+  "service": "books",
+  "modules": [
+    {
+      "module": "widgets",
+      "widgets": [
+        {
+          "name": "run_vat_return_widget",
+          "display_name": "Run VAT Return",
+          "type": "iframe",
+          "url": "widgets/index.html",
+          "location": "invoice.list.button",
+          "widget_type": "modal",
+          "width": 460,
+          "height": 560
+        }
+      ]
+    }
+  ]
+}

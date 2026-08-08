@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Run VAT Return</title>
+<!-- Zoho Extension SDK - required for any Books widget to talk to the host org -->
+<script src="https://js.zohostatic.com/books/webclient/embeddedapp/EmbeddedApp.min.js"></script>
+<style>
+  :root {
+    --ink: #1c2733;
+    --muted: #5b6b7a;
+    --line: #e1e6ea;
+    --accent: #0e6b52;   /* deep teal-green, distinct from Zoho's own brand red, reads as "finance/ledger" */
+    --accent-soft: #e7f3ef;
+    --bg: #ffffff;
+    --danger: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 13px;
+  }
+  .panel { padding: 20px 22px 18px; max-width: 420px; }
+  h1 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 4px;
+    letter-spacing: 0.1px;
+  }
+  .sub {
+    color: var(--muted);
+    margin: 0 0 18px;
+    line-height: 1.4;
+  }
+  label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  input[type="month"] {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--ink);
+    margin-bottom: 16px;
+  }
+  input[type="month"]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .row { display: flex; gap: 10px; margin-top: 4px; }
+  button {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 9px 16px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+  #runBtn {
+    background: var(--accent);
+    color: #fff;
+    flex: 1;
+  }
+  #runBtn:disabled { background: #9db8b0; cursor: not-allowed; }
+  #cancelBtn {
+    background: #fff;
+    color: var(--muted);
+    border-color: var(--line);
+  }
+  .status {
+    margin-top: 18px;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+    display: none;
+  }
+  .status.visible { display: block; }
+  .steps { list-style: none; margin: 0; padding: 0; }
+  .steps li {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 5px 0;
+    color: var(--muted);
+  }
+  .steps li.active { color: var(--ink); font-weight: 600; }
+  .steps li.done { color: var(--accent); }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    border: 1.5px solid var(--line);
+    flex-shrink: 0;
+  }
+  .steps li.active .dot { border-color: var(--accent); background: var(--accent); animation: pulse 1.1s infinite; }
+  .steps li.done .dot { border-color: var(--accent); background: var(--accent); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .result {
+    margin-top: 14px;
+    background: var(--accent-soft);
+    border: 1px solid #c8e3d9;
+    border-radius: 6px;
+    padding: 12px 13px;
+    display: none;
+  }
+  .result.visible { display: block; }
+  .result .folder {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+    word-break: break-all;
+  }
+  .result .figure { margin-top: 8px; font-size: 12px; color: var(--ink); }
+  .result .figure b { font-size: 14px; }
+  .error {
+    margin-top: 14px;
+    background: #fbeceb;
+    border: 1px solid #f0c4c0;
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--danger);
+    font-size: 12px;
+    display: none;
+  }
+  .error.visible { display: block; }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Run VAT return</h1>
+    <p class="sub">Pulls invoices, credit notes, bills, expenses, and debit notes from books for the selected month, then builds the return, ledgers, and trial balance extract for review.</p>
+
+    <label for="period">Tax period</label>
+    <input type="month" id="period" />
+
+    <div class="row">
+      <button id="runBtn">Run</button>
+      <button id="cancelBtn">Cancel</button>
+    </div>
+
+    <div class="status" id="status">
+      <ul class="steps" id="steps">
+        <li data-step="pull"><span class="dot"></span> Pulling books data for the period</li>
+        <li data-step="classify"><span class="dot"></span> Classifying sales, credit notes, bills, expenses (incl. RCM)</li>
+        <li data-step="build"><span class="dot"></span> Building the return, schedules, and ledgers</li>
+        <li data-step="save"><span class="dot"></span> Saving to the output folder</li>
+      </ul>
+    </div>
+
+    <div class="result" id="result">
+      <div>Saved to:</div>
+      <div class="folder" id="folderPath"></div>
+      <div class="figure">Net VAT due: <b id="netVat">—</b></div>
+    </div>
+
+    <div class="error" id="error"></div>
+  </div>
+
+<script>
+// -----------------------------------------------------------------------
+// After deploy.sh finishes, paste the printed Cloud Run URL here (it ends
+// in /run-vat-return). WEBHOOK_SHARED_SECRET must match the value set on
+// the Cloud Run service — see the TODO in main.py.
+// -----------------------------------------------------------------------
+const WEBHOOK_URL = "https://YOUR-CLOUD-RUN-SERVICE-URL.run.app/run-vat-return";
+const WEBHOOK_SHARED_SECRET = "REPLACE_WITH_SAME_VALUE_AS_CLOUD_RUN_ENV_VAR";
+
+let orgId = null;
+
+ZOHO.embeddedApp.on("PageLoad", function (data) {
+  orgId = data && data.organization_id ? data.organization_id : null;
+});
+ZOHO.embeddedApp.init();
+
+// Zoho's docs for the invoice.list.button + widget_type=modal placement note
+// that the popup needs an explicit resize call — the exact SDK method name
+// wasn't confirmed in what I could verify, so this is a best-effort call.
+// If the popup renders at the wrong size in practice, check the current
+// Books Widget SDK reference for the right resize method and swap it in.
+if (ZOHO.embeddedApp.resize) {
+  ZOHO.embeddedApp.resize({ height: 560, width: 460 });
+}
+
+// Default the picker to the current month
+document.getElementById("period").value = new Date().toISOString().slice(0, 7);
+
+const stepOrder = ["pull", "classify", "build", "save"];
+
+function setStep(name, state) {
+  const li = document.querySelector(`li[data-step="${name}"]`);
+  li.classList.remove("active", "done");
+  if (state) li.classList.add(state);
+}
+
+function resetSteps() {
+  stepOrder.forEach((s) => setStep(s, null));
+}
+
+async function runPipeline() {
+  const period = document.getElementById("period").value; // "2026-06"
+  if (!period) return;
+
+  const [year, month] = period.split("-");
+  const monthName = new Date(`${year}-${month}-01`).toLocaleString("en-US", { month: "long" });
+  const shortYear = year.slice(2);
+  const folderName = `VAT - ${monthName}'${shortYear}`;
+
+  document.getElementById("runBtn").disabled = true;
+  document.getElementById("status").classList.add("visible");
+  document.getElementById("result").classList.remove("visible");
+  document.getElementById("error").classList.remove("visible");
+  resetSteps();
+  setStep("pull", "active");
+
+  try {
+    const resp = await fetch(WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Webhook-Secret": WEBHOOK_SHARED_SECRET
+      },
+      body: JSON.stringify({
+        organization_id: orgId,
+        year: year,
+        month: month,
+        folder_name: folderName
+      })
+    });
+
+    if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+    const payload = await resp.json();
+
+    // Server streams back which stage it's on; fall back to a straight
+    // "all done" render if it just returns the final result.
+    stepOrder.forEach((s) => setStep(s, "done"));
+
+    document.getElementById("folderPath").textContent = payload.folder_path || folderName;
+    document.getElementById("netVat").textContent = payload.net_vat_due
+      ? `SAR ${Number(payload.net_vat_due).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+      : "—";
+    document.getElementById("result").classList.add("visible");
+  } catch (err) {
+    document.getElementById("error").textContent =
+      "Couldn't complete the run: " + err.message + ". The books data hasn't been changed — check the connection and try again.";
+    document.getElementById("error").classList.add("visible");
+  } finally {
+    document.getElementById("runBtn").disabled = false;
+  }
+}
+
+document.getElementById("runBtn").addEventListener("click", runPipeline);
+document.getElementById("cancelBtn").addEventListener("click", function () {
+  ZOHO.embeddedApp.close();
+});
+</script>
+</body>
+</html>
